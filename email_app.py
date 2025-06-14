@@ -1,77 +1,113 @@
-from flask import Flask, render_template, request, redirect, url_for, flash
-from flask_mail import Mail, Message
-from dotenv import load_dotenv
-import os
-import csv
-import pandas as pd
+package com.example.emailportal;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.mail.SimpleMailMessage;
+import org.springframework.mail.javamail.JavaMailSenderImpl;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.ModelAttribute;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
-load_dotenv()
+import javax.annotation.PostConstruct;
+import java.io.*;
+import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
 
-app = Flask(__name__)
+@Controller
+public class EmailController {
 
+    @Autowired
+    private Environment env;
 
-email_accounts = [
-    {
-        "MAIL_USERNAME": os.getenv("MAIL_USERNAME_1"),
-        "MAIL_PASSWORD": os.getenv("MAIL_PASSWORD_1"),
-    },
-    {
-        "MAIL_USERNAME": os.getenv("MAIL_USERNAME_2"),
-        "MAIL_PASSWORD": os.getenv("MAIL_PASSWORD_2"),
+    private List<Map<String, String>> emailAccounts = new ArrayList<>();
+
+    private final String CSV_FILE_PATH = "emails.csv";
+
+    @PostConstruct
+    public void init() {
+        Map<String, String> account1 = new HashMap<>();
+        account1.put("MAIL_USERNAME", env.getProperty("MAIL_USERNAME_1"));
+        account1.put("MAIL_PASSWORD", env.getProperty("MAIL_PASSWORD_1"));
+
+        Map<String, String> account2 = new HashMap<>();
+        account2.put("MAIL_USERNAME", env.getProperty("MAIL_USERNAME_2"));
+        account2.put("MAIL_PASSWORD", env.getProperty("MAIL_PASSWORD_2"));
+
+        emailAccounts.add(account1);
+        emailAccounts.add(account2);
     }
-]
 
-app.config["MAIL_SERVER"] = os.getenv("MAIL_SERVER")
-app.config["MAIL_PORT"] = int(os.getenv("MAIL_PORT"))
-app.config["MAIL_USE_TLS"] = os.getenv("MAIL_USE_TLS") == "True"
-app.config["MAIL_USE_SSL"] = os.getenv("MAIL_USE_SSL") == "True"
+    @GetMapping("/")
+    public String index(@RequestParam(value = "search", required = false) String search, Model model) {
+        List<EmailEntry> emailList = new ArrayList<>();
 
-mail = Mail(app)
+        try (BufferedReader br = new BufferedReader(new FileReader(CSV_FILE_PATH))) {
+            String line;
+            while ((line = br.readLine()) != null) {
+                String[] values = line.split(",", -1);
+                if (values.length >= 4) {
+                    EmailEntry entry = new EmailEntry(values[0], values[1], values[2], values[3], LocalDateTime.now().toString());
+                    emailList.add(entry);
+                }
+            }
+        } catch (IOException e) {
+            // File might not exist
+        }
 
-@app.route('/')
-def index():
-    search_query = request.args.get('search', '')
+        if (search != null && !search.isEmpty()) {
+            emailList = emailList.stream().filter(email ->
+                    email.getRecipient().toLowerCase().contains(search.toLowerCase()) ||
+                            email.getSubject().toLowerCase().contains(search.toLowerCase())
+            ).collect(Collectors.toList());
+        }
 
-    try:
-        df = pd.read_csv("emails.csv", names=["Sender Email", "Recipient", "Subject", "Message"])
-        emails = df.to_dict(orient="records")
+        model.addAttribute("emails", emailList);
+        model.addAttribute("searchQuery", search);
+        return "index";
+    }
 
-        if search_query:
-            emails = [email for email in emails if search_query.lower() in email["Recipient"].lower() or search_query.lower() in email["Subject"].lower()]
-    except FileNotFoundError:
-        emails = []
+    @PostMapping("/send-email")
+    public String sendEmail(@RequestParam("recipient_email") String recipient,
+                            @RequestParam("subject") String subject,
+                            @RequestParam("message") String message,
+                            RedirectAttributes redirectAttributes) {
 
-    return render_template("index.html", emails=emails, search_query=search_query)
+        for (Map<String, String> account : emailAccounts) {
+            try {
+                JavaMailSenderImpl mailSender = new JavaMailSenderImpl();
+                mailSender.setHost(env.getProperty("MAIL_SERVER"));
+                mailSender.setPort(Integer.parseInt(env.getProperty("MAIL_PORT")));
+                mailSender.setUsername(account.get("MAIL_USERNAME"));
+                mailSender.setPassword(account.get("MAIL_PASSWORD"));
+                mailSender.getJavaMailProperties().put("mail.smtp.auth", true);
+                mailSender.getJavaMailProperties().put("mail.smtp.starttls.enable", env.getProperty("MAIL_USE_TLS"));
 
-@app.route('/send-email', methods=['POST'])
-def send_email():
-    if request.method == 'POST':
-        recipient_email = request.form['recipient_email']
-        subject = request.form['subject']
-        message = request.form['message']
+                SimpleMailMessage msg = new SimpleMailMessage();
+                msg.setFrom(account.get("MAIL_USERNAME"));
+                msg.setTo(recipient);
+                msg.setSubject(subject);
+                msg.setText(message);
 
-        for account in email_accounts:
-            try:
-                app.config["MAIL_USERNAME"] = account["MAIL_USERNAME"]
-                app.config["MAIL_PASSWORD"] = account["MAIL_PASSWORD"]
-                mail = Mail(app)
+                mailSender.send(msg);
 
-                msg = Message(subject, sender=app.config["MAIL_USERNAME"], recipients=[recipient_email])
-                msg.body = message
-                mail.send(msg)
+                try (BufferedWriter writer = new BufferedWriter(new FileWriter(CSV_FILE_PATH, true))) {
+                    writer.write(String.format("%s,%s,%s,%s\n", account.get("MAIL_USERNAME"), recipient, subject, message));
+                }
 
-               
-                with open("emails.csv", mode="a", newline="", encoding="utf-8") as file:
-                    writer = csv.writer(file)
-                    writer.writerow([app.config["MAIL_USERNAME"], recipient_email, subject, message])
+                redirectAttributes.addFlashAttribute("message", "Email sent successfully from " + account.get("MAIL_USERNAME") + "!");
+                redirectAttributes.addFlashAttribute("alertClass", "success");
 
-                flash(f"Email sent successfully from {app.config['MAIL_USERNAME']}!", "success")
-            except Exception as e:
-                flash(f"Error sending email from {app.config['MAIL_USERNAME']}: {str(e)}", "danger")
-
-        return redirect(url_for('index'))
-
-if __name__ == '__main__':
-    app.secret_key = 'your_secret_key'
-    app.run(debug=True)
+            } catch (Exception e) {
+                redirectAttributes.addFlashAttribute("message", "Error sending email from " + account.get("MAIL_USERNAME") + ": " + e.getMessage());
+                redirectAttributes.addFlashAttribute("alertClass", "danger");
+            }
+        }
+        return "redirect:/";
+    }
+}
