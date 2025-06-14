@@ -1,12 +1,11 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Email Portal</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    
-    <!-- Custom CSS -->
+
     <style>
         body {
             background: url('https://images.mailslurp.com/unsafe/fit-in/1920x0//media/mail-template-size.jpeg?quality=100&cacheBuster=') no-repeat center center fixed;
@@ -21,7 +20,7 @@
         }
         .container {
             max-width: 800px;
-            background: rgba(34, 34, 34, 0.7); /* Transparent container */
+            background: rgba(34, 34, 34, 0.7);
             padding: 30px;
             border-radius: 20px;
             box-shadow: 0px 10px 25px rgba(0, 0, 0, 0.3);
@@ -76,41 +75,49 @@
 <body>
 
 <div class="container">
-    <h2> Email </h2>
-    
-    <!-- Email Form and Search Bar -->
-    <form action="{{ url_for('send_email') }}" method="post" class="mb-4">
-        <input type="email" class="form-control mb-3" name="recipient_email" placeholder="Receivers Email" required>
+    <h2>Email</h2>
+
+    <!- Flash Message ->
+    <div th:if="${message}" class="alert" th:classappend="${alertClass}">
+        <span th:text="${message}"></span>
+    </div>
+
+    <!- Email Form ->
+    <form th:action="@{/send-email}" method="post" class="mb-4">
+        <input type="email" class="form-control mb-3" name="recipientEmail" placeholder="Receiver's Email" required>
         <input type="text" class="form-control mb-3" name="subject" placeholder="Subject" required>
         <textarea class="form-control mb-3" name="message" rows="4" placeholder="Type your message here" required></textarea>
         <button type="submit" class="btn btn-custom w-100">📨 Send Now</button>
     </form>
+
     <h2>Email History</h2>
-    <!-- Search Bar -->
-    <form method="GET" action="/" class="mb-4">
-        <input type="text" name="search" class="form-control" placeholder="Search emails">
+
+    <!- Search Bar ->
+    <form method="GET" th:action="@{/}" class="mb-4">
+        <input type="text" name="search" class="form-control" placeholder="Search emails" th:value="${searchQuery}">
         <button type="submit" class="btn btn-info mt-2 w-100">Find</button>
     </form>
-    
+
+    <!- Table ->
     <div class="table-responsive">
         <table class="table table-dark table-bordered text-center">
             <thead>
-                <tr>
-                    <th>From</th>
-                    <th>To</th>
-                    <th>Subject</th>
-                    <th>Content</th>
-                    <th>Time Sent</th>
-                </tr>
+            <tr>
+                <th>From</th>
+                <th>To</th>
+                <th>Subject</th>
+                <th>Content</th>
+                <th>Time Sent</th>
+            </tr>
             </thead>
             <tbody>
-                <tr>
-                    <td> Sender Email </td>
-                    <td>Receiver Email</td>
-                    <td>Subject</td>
-                    <td>Message</td>
-                    <td>Time Duration</td>
-                </tr>
+            <tr th:each="email : ${emails}">
+                <td th:text="${email.sender}"></td>
+                <td th:text="${email.recipient}"></td>
+                <td th:text="${email.subject}"></td>
+                <td th:text="${email.message}"></td>
+                <td th:text="${email.timeSent}"></td>
+            </tr>
             </tbody>
         </table>
     </div>
